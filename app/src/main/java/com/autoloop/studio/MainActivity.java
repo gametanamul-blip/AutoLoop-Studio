@@ -11,6 +11,98 @@ import android.widget.*;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
+
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.util.UnstableApi;
+import androidx.media3.transformer.*;
+import androidx.media3.effect.Presentation;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Collections;
+
+@UnstableApi
+public class MainActivity extends AppCompatActivity {
+
+    Button videoButton, musicButton, exportButton;
+    TextView videoText, musicText, statusText;
+    EditText durationInput;
+    Spinner qualitySpinner;
+
+    Uri videoUri, musicUri;
+    long videoDuration = 0;
+
+    Transformer transformer;
+
+    ActivityResultLauncher<String[]> videoPicker;
+    ActivityResultLauncher<String[]> musicPicker;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(30, 30, 30, 30);
+        layout.setBackgroundColor(0xFFFFFFFF);
+
+        TextView title = new TextView(this);
+        title.setText("AutoLoop Studio");
+        title.setTextSize(28);
+        title.setTextColor(0xFF000000);
+        layout.addView(title);
+
+        videoButton = new Button(this);
+        videoButton.setText("Select Video");
+        layout.addView(videoButton);
+
+        videoText = new TextView(this);
+        videoText.setText("No video selected");
+        layout.addView(videoText);
+
+        musicButton = new Button(this);
+        musicButton.setText("Select Background Music");
+        layout.addView(musicButton);
+
+        musicText = new TextView(this);
+        musicText.setText("No music selected");
+        layout.addView(musicText);
+
+        TextView durationLabel = new TextView(this);
+        durationLabel.setText("Enter Video Duration (HH:MM:SS)");
+        layout.addView(durationLabel);
+
+        durationInput = new EditText(this);
+        durationInput.setHint("Example: 01:13:00");
+        durationInput.setSingleLine(true);
+        durationInput.setInputType(
+                InputType.TYPE_CLASS_DATETIME |
+                InputType.TYPE_DATETIME_VARIATION_TIME
+        );
+        layout.addView(durationInput);
+
+        TextView qualityLabel = new TextView(this);
+        qualityLabel.setText("Select Quality");
+        layout.addView(qualityLabel);
+
+        qualitySpinner = new Spinner(this);
+        qualitySpinner.setAdapter(new ArrayAdapter<>(
+                this,
+                android.R.layout.simple_spinner_dropdown_item,
+                new String[]{"720p", "1080p"}
+        ));
+        layout.addView(qualitySpinner);
+
+        exportButton = new Button(this);
+        exportButton.setText("START EXPORT");
+        layout.addView(exportButton);
+
+        statusText = new TextView(this);
+        statusText.setText("Ready");
+        layout.addView(statusText);
+
+        setContentView(layout);
+
         videoPicker = registerForActivityResult(
                 new ActivityResultContracts.OpenDocument(),
                 uri -> {
@@ -77,6 +169,7 @@ import androidx.activity.result.contract.ActivityResultContracts;
     private long getTargetDuration() {
 
         String input = durationInput.getText().toString().trim();
+
         String[] parts = input.split(":");
 
         if (parts.length != 3) {
@@ -91,10 +184,13 @@ import androidx.activity.result.contract.ActivityResultContracts;
 
         if (hours < 0 || minutes < 0 || minutes > 59
                 || seconds < 0 || seconds > 59) {
-            throw new IllegalArgumentException("Invalid duration");
+            throw new IllegalArgumentException(
+                    "Invalid duration"
+            );
         }
 
-        long totalSeconds = hours * 3600 + minutes * 60 + seconds;
+        long totalSeconds =
+                hours * 3600 + minutes * 60 + seconds;
 
         if (totalSeconds <= 0) {
             throw new IllegalArgumentException(
@@ -120,17 +216,18 @@ import androidx.activity.result.contract.ActivityResultContracts;
                     qualitySpinner.getSelectedItemPosition() == 0
                     ? 720 : 1080;
 
-            int count = (int) (
+            long countLong =
                     (targetDuration + videoDuration - 1)
-                    / videoDuration
-            );
+                    / videoDuration;
 
-            if (count > 500) {
+            if (countLong > 500) {
                 statusText.setText(
                         "Video is too short for this export"
                 );
                 return;
             }
+
+            int count = (int) countLong;
 
             exportButton.setEnabled(false);
             statusText.setText("Preparing video...");
@@ -236,6 +333,7 @@ import androidx.activity.result.contract.ActivityResultContracts;
                                         "Export completed!\nSaved in:\n"
                                                 + output.getAbsolutePath()
                                 );
+
                                 exportButton.setEnabled(true);
                             });
                         }
@@ -251,6 +349,7 @@ import androidx.activity.result.contract.ActivityResultContracts;
                                         "Export failed: "
                                                 + exception.getMessage()
                                 );
+
                                 exportButton.setEnabled(true);
                             });
                         }
@@ -265,95 +364,9 @@ import androidx.activity.result.contract.ActivityResultContracts;
             );
 
         } catch (Exception e) {
+
             statusText.setText("Error: " + e.getMessage());
             exportButton.setEnabled(true);
         }
     }
 }
-import androidx.media3.common.MediaItem;
-import androidx.media3.common.util.UnstableApi;
-import androidx.media3.transformer.*;
-import androidx.media3.effect.Presentation;
-
-import java.io.File;
-import java.util.ArrayList;
-import java.util.Collections;
-
-@UnstableApi
-public class MainActivity extends AppCompatActivity {
-
-    Button videoButton, musicButton, exportButton;
-    TextView videoText, musicText, statusText;
-    EditText durationInput;
-    Spinner qualitySpinner;
-
-    Uri videoUri, musicUri;
-    long videoDuration = 0;
-
-    Transformer transformer;
-
-    ActivityResultLauncher<String[]> videoPicker;
-    ActivityResultLauncher<String[]> musicPicker;
-
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setPadding(30, 30, 30, 30);
-        layout.setBackgroundColor(0xFFFFFFFF);
-
-        TextView title = new TextView(this);
-        title.setText("AutoLoop Studio");
-        title.setTextSize(28);
-        title.setTextColor(0xFF000000);
-        layout.addView(title);
-
-        videoButton = new Button(this);
-        videoButton.setText("Select Video");
-        layout.addView(videoButton);
-
-        videoText = new TextView(this);
-        videoText.setText("No video selected");
-        layout.addView(videoText);
-
-        musicButton = new Button(this);
-        musicButton.setText("Select Background Music");
-        layout.addView(musicButton);
-
-        musicText = new TextView(this);
-        musicText.setText("No music selected");
-        layout.addView(musicText);
-
-        TextView durationLabel = new TextView(this);
-        durationLabel.setText("Enter Video Duration (HH:MM:SS)");
-        layout.addView(durationLabel);
-
-        durationInput = new EditText(this);
-        durationInput.setHint("Example: 01:13:00");
-        durationInput.setSingleLine(true);
-        durationInput.setInputType(InputType.TYPE_CLASS_DATETIME);
-        layout.addView(durationInput);
-
-        TextView qualityLabel = new TextView(this);
-        qualityLabel.setText("Select Quality");
-        layout.addView(qualityLabel);
-
-        qualitySpinner = new Spinner(this);
-        qualitySpinner.setAdapter(new ArrayAdapter<>(
-                this,
-                android.R.layout.simple_spinner_dropdown_item,
-                new String[]{"720p", "1080p"}
-        ));
-        layout.addView(qualitySpinner);
-
-        exportButton = new Button(this);
-        exportButton.setText("START EXPORT");
-        layout.addView(exportButton);
-
-        statusText = new TextView(this);
-        statusText.setText("Ready");
-        layout.addView(statusText);
-
-        setContentView(layout);
