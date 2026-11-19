@@ -75,10 +75,7 @@ public class MainActivity extends AppCompatActivity {
         durationInput = new EditText(this);
         durationInput.setHint("Example: 01:13:00");
         durationInput.setSingleLine(true);
-        durationInput.setInputType(
-                InputType.TYPE_CLASS_DATETIME |
-                InputType.TYPE_DATETIME_VARIATION_TIME
-        );
+        durationInput.setInputType(InputType.TYPE_CLASS_DATETIME);
         layout.addView(durationInput);
 
         TextView qualityLabel = new TextView(this);
@@ -102,6 +99,3 @@ public class MainActivity extends AppCompatActivity {
         layout.addView(statusText);
 
         setContentView(layout);
-
-        videoPicker = registerForActivityResult(
-                new
