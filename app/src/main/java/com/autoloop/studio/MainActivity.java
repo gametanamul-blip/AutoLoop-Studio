@@ -1,15 +1,12 @@
 package com.autoloop.studio;
 
-import android.app.Activity;
 import android.os.Bundle;
 import android.net.Uri;
 import android.content.Intent;
 import android.media.MediaMetadataRetriever;
 import android.os.Environment;
-import android.view.View;
 import android.widget.*;
-import android.os.Handler;
-
+import androidx.appcompat.app.AppCompatActivity;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 
@@ -17,14 +14,13 @@ import androidx.media3.common.MediaItem;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.transformer.*;
 import androidx.media3.effect.Presentation;
-import androidx.media3.common.Effect;
 
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 
 @UnstableApi
-public class MainActivity extends Activity {
+public class MainActivity extends AppCompatActivity {
 
     Button videoButton, musicButton, exportButton;
     TextView videoText, musicText, statusText;
@@ -128,7 +124,9 @@ public class MainActivity extends Activity {
 
                         } catch (Exception e) {
                             videoDuration = 0;
-                            statusText.setText("Could not read video duration");
+                            statusText.setText(
+                                    "Could not read video duration"
+                            );
                         }
                     }
                 }
@@ -181,13 +179,14 @@ public class MainActivity extends Activity {
                     ? 720 : 1080;
 
             int count = (int) (targetDuration / videoDuration);
-
             long remaining = targetDuration % videoDuration;
 
             if (remaining > 0) count++;
 
             if (count > 500) {
-                statusText.setText("Video is too short for this export");
+                statusText.setText(
+                        "Video is too short for this export"
+                );
                 exportButton.setEnabled(true);
                 return;
             }
