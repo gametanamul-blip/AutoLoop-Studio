@@ -1,12 +1,16 @@
 package com.autoloop.studio;
 
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
 import android.net.Uri;
 import android.content.Intent;
 import android.media.MediaMetadataRetriever;
 import android.os.Environment;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.Bitmap;
 import android.graphics.drawable.GradientDrawable;
 import android.text.InputType;
 import android.view.Gravity;
@@ -19,12 +23,17 @@ import androidx.activity.result.contract.ActivityResultContracts;
 
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.util.UnstableApi;
+import androidx.media3.common.Player;
+import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.ui.PlayerView;
 import androidx.media3.transformer.*;
+import androidx.media3.transformer.ProgressHolder;
 import androidx.media3.effect.Presentation;
 
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Locale;
 
 @UnstableApi
 public class MainActivity extends AppCompatActivity {
@@ -35,18 +44,79 @@ public class MainActivity extends AppCompatActivity {
     private final int GRAY = 0xFFADB3C2;
     private final int ACCENT = 0xFF8B5CF6;
 
-    Button videoButton, musicButton, exportButton;
+    Button videoButton, musicButton, exportButton, cancelButton;
+
     TextView videoText, musicText, statusText;
+    TextView percentText, elapsedText, remainingText;
+
     EditText durationInput;
     Spinner qualitySpinner;
 
+    ImageView thumbnailView;
+    PlayerView playerView;
+
+    ProgressBar exportProgress;
+
     Uri videoUri, musicUri;
+
     long videoDuration = 0;
+    long exportStartTime = 0;
 
     Transformer transformer;
+    ExoPlayer player;
+
+    Handler handler = new Handler(Looper.getMainLooper());
+
+    boolean exporting = false;
 
     ActivityResultLauncher<String[]> videoPicker;
     ActivityResultLauncher<String[]> musicPicker;
+
+    private final Runnable progressRunnable = new Runnable() {
+        @Override
+        public void run() {
+
+            if (!exporting || transformer == null) {
+                return;
+            }
+
+            ProgressHolder progressHolder = new ProgressHolder();
+
+            int state = transformer.getProgress(progressHolder);
+
+            if (state == Transformer.PROGRESS_STATE_AVAILABLE) {
+
+                int percent = progressHolder.progress;
+
+                exportProgress.setProgress(percent);
+                percentText.setText(percent + "%");
+
+                long elapsed =
+                        (SystemClock.elapsedRealtime() - exportStartTime) / 1000;
+
+                elapsedText.setText(
+                        "Elapsed: " + formatTime(elapsed)
+                );
+
+                if (percent > 0) {
+
+                    long remaining =
+                            (elapsed * (100 - percent)) / percent;
+
+                    remainingText.setText(
+                            "Remaining: " + formatTime(remaining)
+                    );
+
+                } else {
+
+                    remainingText.setText("Remaining: Calculating...");
+                }
+
+            }
+
+            handler.postDelayed(this, 500);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -62,25 +132,21 @@ public class MainActivity extends AppCompatActivity {
         scrollView.addView(main);
         setContentView(scrollView);
 
-        TextView brand = new TextView(this);
-        brand.setText("AUTOLOOP STUDIO");
-        brand.setTextColor(ACCENT);
-        brand.setTextSize(13);
-        brand.setTypeface(null, Typeface.BOLD);
+        TextView brand = createText(
+                "AUTOLOOP STUDIO", 13, ACCENT, true
+        );
         main.addView(brand);
 
-        TextView title = new TextView(this);
-        title.setText("Create Something\nAmazing.");
-        title.setTextColor(WHITE);
-        title.setTextSize(29);
-        title.setTypeface(null, Typeface.BOLD);
+        TextView title = createText(
+                "Create Something\nAmazing.", 29, WHITE, true
+        );
         title.setPadding(0, 14, 0, 5);
         main.addView(title);
 
-        TextView subtitle = new TextView(this);
-        subtitle.setText("Your video loop & export studio");
-        subtitle.setTextColor(GRAY);
-        subtitle.setTextSize(14);
+        TextView subtitle = createText(
+                "Your video loop & export studio",
+                14, GRAY, false
+        );
         main.addView(subtitle);
 
         addSpace(main, 25);
@@ -90,15 +156,38 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout videoCard = createCard();
         main.addView(videoCard);
 
-        TextView videoHeading = createText(
-                "🎬  Select Your Video", 17, WHITE, true
+        videoCard.addView(createText(
+                "🎬  Video Preview", 17, WHITE, true
+        ));
+
+        thumbnailView = new ImageView(this);
+        thumbnailView.setBackground(createBackground(
+                0xFF292D38, 12
+        ));
+        thumbnailView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+
+        LinearLayout.LayoutParams imageParams =
+                new LinearLayout.LayoutParams(-1, 190);
+
+        imageParams.topMargin = 12;
+        imageParams.bottomMargin = 12;
+
+        videoCard.addView(thumbnailView, imageParams);
+
+        playerView = new PlayerView(this);
+        playerView.setLayoutParams(
+                new LinearLayout.LayoutParams(-1, 200)
         );
-        videoCard.addView(videoHeading);
+        playerView.setUseController(true);
+        playerView.setVisibility(View.GONE);
+
+        videoCard.addView(playerView);
 
         videoText = createText(
                 "No video selected", 13, GRAY, false
         );
-        videoText.setPadding(0, 8, 0, 12);
+
+        videoText.setPadding(0, 10, 0, 12);
         videoCard.addView(videoText);
 
         videoButton = createButton("＋  Choose Video");
@@ -111,14 +200,14 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout musicCard = createCard();
         main.addView(musicCard);
 
-        TextView musicHeading = createText(
+        musicCard.addView(createText(
                 "🎵  Background Music", 17, WHITE, true
-        );
-        musicCard.addView(musicHeading);
+        ));
 
         musicText = createText(
                 "No music selected", 13, GRAY, false
         );
+
         musicText.setPadding(0, 8, 0, 12);
         musicCard.addView(musicText);
 
@@ -132,39 +221,40 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout settingsCard = createCard();
         main.addView(settingsCard);
 
-        TextView durationLabel = createText(
+        settingsCard.addView(createText(
                 "Video Duration", 15, WHITE, true
-        );
-        settingsCard.addView(durationLabel);
+        ));
 
         durationInput = new EditText(this);
+
         durationInput.setSingleLine(true);
-        durationInput.setHint("HH:MM:SS  (Example: 01:13:00)");
+        durationInput.setHint("HH:MM:SS  (01:13:00)");
         durationInput.setHintTextColor(0xFF777D8B);
         durationInput.setTextColor(WHITE);
         durationInput.setTextSize(15);
+
         durationInput.setInputType(
                 InputType.TYPE_CLASS_DATETIME |
                 InputType.TYPE_DATETIME_VARIATION_TIME
         );
+
         durationInput.setPadding(15, 12, 15, 12);
-        durationInput.setBackground(createBackground(
-                0xFF292D38, 12
-        ));
+
+        durationInput.setBackground(
+                createBackground(0xFF292D38, 12)
+        );
 
         LinearLayout.LayoutParams inputParams =
-                new LinearLayout.LayoutParams(
-                        -1, -2
-                );
+                new LinearLayout.LayoutParams(-1, -2);
+
         inputParams.topMargin = 10;
         inputParams.bottomMargin = 22;
 
         settingsCard.addView(durationInput, inputParams);
 
-        TextView qualityLabel = createText(
+        settingsCard.addView(createText(
                 "Export Resolution", 15, WHITE, true
-        );
-        settingsCard.addView(qualityLabel);
+        ));
 
         qualitySpinner = new Spinner(this);
 
@@ -181,46 +271,91 @@ public class MainActivity extends AppCompatActivity {
 
         qualitySpinner.setAdapter(adapter);
 
-        LinearLayout.LayoutParams spinnerParams =
-                new LinearLayout.LayoutParams(
-                        -1, -2
-                );
-        spinnerParams.topMargin = 10;
-
-        settingsCard.addView(qualitySpinner, spinnerParams);
+        settingsCard.addView(qualitySpinner);
 
         addSpace(main, 25);
 
         exportButton = createButton("▶  START EXPORT");
         exportButton.setTextSize(17);
         exportButton.setPadding(10, 17, 10, 17);
-        exportButton.setBackground(
-                createBackground(ACCENT, 16)
-        );
+
         main.addView(exportButton);
+
+        addSpace(main, 15);
+
+        LinearLayout progressCard = createCard();
+        main.addView(progressCard);
+
+        progressCard.addView(createText(
+                "EXPORT PROGRESS", 13, ACCENT, true
+        ));
+
+        percentText = createText(
+                "0%", 30, WHITE, true
+        );
+
+        percentText.setGravity(Gravity.CENTER);
+        percentText.setPadding(0, 15, 0, 10);
+
+        progressCard.addView(percentText);
+
+        exportProgress = new ProgressBar(
+                this, null,
+                android.R.attr.progressBarStyleHorizontal
+        );
+
+        exportProgress.setMax(100);
+        exportProgress.setProgress(0);
+
+        progressCard.addView(exportProgress);
+
+        elapsedText = createText(
+                "Elapsed: 00:00", 13, GRAY, false
+        );
+
+        elapsedText.setPadding(0, 15, 0, 5);
+        progressCard.addView(elapsedText);
+
+        remainingText = createText(
+                "Remaining: --:--", 13, GRAY, false
+        );
+
+        progressCard.addView(remainingText);
+
+        cancelButton = createButton("✕  CANCEL EXPORT");
+        cancelButton.setVisibility(View.GONE);
+
+        LinearLayout.LayoutParams cancelParams =
+                new LinearLayout.LayoutParams(-1, -2);
+
+        cancelParams.topMargin = 15;
+
+        progressCard.addView(cancelButton, cancelParams);
 
         addSpace(main, 15);
 
         LinearLayout statusCard = createCard();
         main.addView(statusCard);
 
-        TextView statusHeading = createText(
+        statusCard.addView(createText(
                 "EXPORT STATUS", 12, ACCENT, true
-        );
-        statusCard.addView(statusHeading);
+        ));
 
         statusText = createText(
-                "●  Ready to export", 14, WHITE, false
+                "● Ready to export", 14, WHITE, false
         );
+
         statusText.setPadding(0, 9, 0, 0);
         statusCard.addView(statusText);
 
         TextView footer = createText(
-                "AUTOLOOP STUDIO  •  VERSION 2.0",
+                "AUTOLOOP STUDIO • VERSION 3.0",
                 11, GRAY, false
         );
+
         footer.setGravity(Gravity.CENTER);
         footer.setPadding(0, 25, 0, 0);
+
         main.addView(footer);
 
         setupPickers();
@@ -234,13 +369,17 @@ public class MainActivity extends AppCompatActivity {
         );
 
         exportButton.setOnClickListener(v -> startExport());
+
+        cancelButton.setOnClickListener(v -> cancelExport());
     }
 
     private LinearLayout createCard() {
 
         LinearLayout card = new LinearLayout(this);
+
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(17, 17, 17, 17);
+
         card.setBackground(createBackground(CARD, 18));
 
         return card;
@@ -249,16 +388,21 @@ public class MainActivity extends AppCompatActivity {
     private GradientDrawable createBackground(
             int color, int radius
     ) {
+
         GradientDrawable drawable = new GradientDrawable();
+
         drawable.setColor(color);
         drawable.setCornerRadius(radius);
+
         return drawable;
     }
 
     private TextView createText(
             String value, int size, int color, boolean bold
     ) {
+
         TextView text = new TextView(this);
+
         text.setText(value);
         text.setTextSize(size);
         text.setTextColor(color);
@@ -273,10 +417,12 @@ public class MainActivity extends AppCompatActivity {
     private Button createButton(String value) {
 
         Button button = new Button(this);
+
         button.setText(value);
         button.setTextColor(WHITE);
         button.setTextSize(14);
         button.setAllCaps(false);
+
         button.setBackground(createBackground(ACCENT, 12));
 
         return button;
@@ -285,20 +431,43 @@ public class MainActivity extends AppCompatActivity {
     private void addSectionTitle(
             LinearLayout layout, String value
     ) {
+
         TextView heading = createText(
                 value, 12, GRAY, true
         );
 
         heading.setPadding(0, 0, 0, 10);
+
         layout.addView(heading);
     }
 
     private void addSpace(
             LinearLayout layout, int height
     ) {
+
         View space = new View(this);
+
         layout.addView(space,
                 new LinearLayout.LayoutParams(1, height));
+    }
+
+    private String formatTime(long seconds) {
+
+        long hours = seconds / 3600;
+        long minutes = (seconds % 3600) / 60;
+        long secs = seconds % 60;
+
+        if (hours > 0) {
+            return String.format(
+                    Locale.US, "%02d:%02d:%02d",
+                    hours, minutes, secs
+            );
+        }
+
+        return String.format(
+                Locale.US, "%02d:%02d",
+                minutes, secs
+        );
     }
 
     private void setupPickers() {
@@ -306,40 +475,74 @@ public class MainActivity extends AppCompatActivity {
         videoPicker = registerForActivityResult(
                 new ActivityResultContracts.OpenDocument(),
                 uri -> {
-                    if (uri != null) {
-                        videoUri = uri;
 
-                        try {
-                            getContentResolver().takePersistableUriPermission(
-                                    uri,
-                                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                            );
+                    if (uri == null) return;
 
-                            MediaMetadataRetriever retriever =
-                                    new MediaMetadataRetriever();
+                    videoUri = uri;
 
-                            retriever.setDataSource(this, uri);
+                    try {
 
-                            String duration =
-                                    retriever.extractMetadata(
-                                    MediaMetadataRetriever.METADATA_KEY_DURATION
-                            );
+                        getContentResolver().takePersistableUriPermission(
+                                uri,
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        );
 
-                            videoDuration = Long.parseLong(duration);
-                            retriever.release();
+                        MediaMetadataRetriever retriever =
+                                new MediaMetadataRetriever();
 
-                            videoText.setText("✓ Video selected");
+                        retriever.setDataSource(this, uri);
 
-                            statusText.setText(
-                                    "● Video ready"
-                            );
+                        String duration =
+                                retriever.extractMetadata(
+                                        MediaMetadataRetriever.METADATA_KEY_DURATION
+                                );
 
-                        } catch (Exception e) {
-                            videoDuration = 0;
-                            statusText.setText(
-                                    "Could not read video"
-                            );
+                        videoDuration = Long.parseLong(duration);
+
+                        Bitmap thumbnail =
+                                retriever.getFrameAtTime(
+                                        1000000,
+                                        MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                                );
+
+                        retriever.release();
+
+                        if (thumbnail != null) {
+                            thumbnailView.setImageBitmap(thumbnail);
                         }
+
+                        videoText.setText(
+                                "✓ Video selected • " +
+                                formatTime(videoDuration / 1000)
+                        );
+
+                        playerView.setVisibility(View.VISIBLE);
+
+                        thumbnailView.setVisibility(View.GONE);
+
+                        if (player != null) {
+                            player.release();
+                        }
+
+                        player = new ExoPlayer.Builder(this).build();
+
+                        playerView.setPlayer(player);
+
+                        player.setMediaItem(
+                                MediaItem.fromUri(videoUri)
+                        );
+
+                        player.prepare();
+
+                        player.setPlayWhenReady(false);
+
+                        statusText.setText("● Video ready");
+
+                    } catch (Exception e) {
+
+                        statusText.setText(
+                                "Could not load video: " + e.getMessage()
+                        );
                     }
                 }
         );
@@ -347,18 +550,19 @@ public class MainActivity extends AppCompatActivity {
         musicPicker = registerForActivityResult(
                 new ActivityResultContracts.OpenDocument(),
                 uri -> {
-                    if (uri != null) {
-                        musicUri = uri;
 
-                        try {
-                            getContentResolver().takePersistableUriPermission(
-                                    uri,
-                                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                            );
-                        } catch (Exception ignored) {}
+                    if (uri == null) return;
 
-                        musicText.setText("✓ Music selected");
-                    }
+                    musicUri = uri;
+
+                    try {
+                        getContentResolver().takePersistableUriPermission(
+                                uri,
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        );
+                    } catch (Exception ignored) {}
+
+                    musicText.setText("✓ Background music selected");
                 }
         );
     }
@@ -382,6 +586,7 @@ public class MainActivity extends AppCompatActivity {
 
         if (hours < 0 || minutes < 0 || minutes > 59
                 || seconds < 0 || seconds > 59) {
+
             throw new IllegalArgumentException(
                     "Invalid duration"
             );
@@ -400,8 +605,14 @@ public class MainActivity extends AppCompatActivity {
 
     private void startExport() {
 
+        if (exporting) return;
+
         if (videoUri == null || videoDuration <= 0) {
-            statusText.setText("● Please select a valid video");
+
+            statusText.setText(
+                    "● Please select a valid video"
+            );
+
             return;
         }
 
@@ -418,15 +629,25 @@ public class MainActivity extends AppCompatActivity {
                     / videoDuration;
 
             if (countLong > 500) {
+
                 statusText.setText(
                         "Video is too short for this export"
                 );
+
                 return;
             }
 
             int count = (int) countLong;
 
             exportButton.setEnabled(false);
+            cancelButton.setVisibility(View.VISIBLE);
+
+            exportProgress.setProgress(0);
+            percentText.setText("0%");
+
+            elapsedText.setText("Elapsed: 00:00");
+            remainingText.setText("Remaining: Calculating...");
+
             statusText.setText("● Preparing video...");
 
             ArrayList<EditedMediaItem> videoItems =
@@ -441,6 +662,7 @@ public class MainActivity extends AppCompatActivity {
                         new MediaItem.Builder().setUri(videoUri);
 
                 if (remaining < videoDuration) {
+
                     builder.setClippingConfiguration(
                             new MediaItem.ClippingConfiguration.Builder()
                                     .setEndPositionMs(remaining)
@@ -523,13 +745,27 @@ public class MainActivity extends AppCompatActivity {
                                 Composition composition,
                                 ExportResult result
                         ) {
+
                             runOnUiThread(() -> {
+
+                                exporting = false;
+
+                                handler.removeCallbacks(progressRunnable);
+
+                                exportProgress.setProgress(100);
+                                percentText.setText("100%");
+
                                 statusText.setText(
-                                        "✓ Export completed!\n"
-                                        + output.getAbsolutePath()
+                                        "✓ Export completed!\n" +
+                                        output.getAbsolutePath()
+                                );
+
+                                remainingText.setText(
+                                        "Remaining: Completed"
                                 );
 
                                 exportButton.setEnabled(true);
+                                cancelButton.setVisibility(View.GONE);
                             });
                         }
 
@@ -539,17 +775,28 @@ public class MainActivity extends AppCompatActivity {
                                 ExportResult result,
                                 ExportException exception
                         ) {
+
                             runOnUiThread(() -> {
+
+                                exporting = false;
+
+                                handler.removeCallbacks(progressRunnable);
+
                                 statusText.setText(
-                                        "Export failed: "
-                                        + exception.getMessage()
+                                        "Export failed: " +
+                                        exception.getMessage()
                                 );
 
                                 exportButton.setEnabled(true);
+                                cancelButton.setVisibility(View.GONE);
                             });
                         }
                     })
                     .build();
+
+            exporting = true;
+
+            exportStartTime = SystemClock.elapsedRealtime();
 
             statusText.setText("● Export started...");
 
@@ -558,13 +805,50 @@ public class MainActivity extends AppCompatActivity {
                     output.getAbsolutePath()
             );
 
+            handler.post(progressRunnable);
+
         } catch (Exception e) {
+
+            exporting = false;
 
             statusText.setText(
                     "Error: " + e.getMessage()
             );
 
             exportButton.setEnabled(true);
+            cancelButton.setVisibility(View.GONE);
         }
+    }
+
+    private void cancelExport() {
+
+        if (transformer != null && exporting) {
+
+            transformer.cancel();
+
+            exporting = false;
+
+            handler.removeCallbacks(progressRunnable);
+
+            statusText.setText("● Export cancelled");
+
+            exportButton.setEnabled(true);
+            cancelButton.setVisibility(View.GONE);
+
+            remainingText.setText("Remaining: Cancelled");
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+
+        handler.removeCallbacks(progressRunnable);
+
+        if (player != null) {
+            player.release();
+            player = null;
+        }
+
+        super.onDestroy();
     }
 }
